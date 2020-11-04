@@ -518,7 +518,7 @@ def setROI(camera, OffsetX, OffsetY, nWidth, nHeight):
     return 0
 
 class Camera():   
-    def __init__() :
+    def __init__(self) :
         # 发现相机
         # enumerate camera
         self.streamSource = None
@@ -601,11 +601,13 @@ class Camera():
 
         self.streamSource = streamSource
 
-    def grab_img():
+    def grab_img(self):
         # 主动取图
         # get one frame
         if not self.streamSource:
             return
+
+        streamSource = self.streamSource
 
         frame = pointer(GENICAM_Frame())
         nRet = streamSource.contents.getFrame(streamSource, byref(frame), c_uint(1000))
@@ -683,7 +685,7 @@ class Camera():
 
         # 关闭相机
         # close camera
-        nRet = closeCamera(camera)
+        nRet = closeCamera(self.camera)
         if ( nRet != 0 ):
             print("closeCamera fail")
             # 释放相关资源
