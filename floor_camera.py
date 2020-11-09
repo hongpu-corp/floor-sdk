@@ -563,6 +563,7 @@ class Camera():
         # create corresponding property node according to the value type of property, here is enumNode
         # 自由拉流：TriggerMode 需为 off
         # set trigger mode to Off for continuously grabbing
+        # 暂时取消此功能。
         """ trigModeEnumNode = pointer(GENICAM_EnumNode())
         trigModeEnumNodeInfo = GENICAM_EnumNodeInfo() 
         trigModeEnumNodeInfo.pCamera = pointer(camera)
