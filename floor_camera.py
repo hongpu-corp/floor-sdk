@@ -263,7 +263,7 @@ def closeCamera(camera):
     
     return 0    
 
-# 设置曝光
+""" # 设置曝光
 # set camera ExposureTime
 def setExposureTime(camera, dVal):
     # 通用属性设置:设置曝光 --根据属性类型，直接构造属性节点。如曝光是 double类型，构造doubleNode节点
@@ -292,7 +292,7 @@ def setExposureTime(camera, dVal):
     # 释放节点资源
     # release node resource at the end of use
     exposureTimeNode.contents.release(exposureTimeNode)    
-    return 0
+    return 0 """
     
 # 枚举相机
 # enumerate camera
@@ -563,7 +563,7 @@ class Camera():
         # create corresponding property node according to the value type of property, here is enumNode
         # 自由拉流：TriggerMode 需为 off
         # set trigger mode to Off for continuously grabbing
-        trigModeEnumNode = pointer(GENICAM_EnumNode())
+        """ trigModeEnumNode = pointer(GENICAM_EnumNode())
         trigModeEnumNodeInfo = GENICAM_EnumNodeInfo() 
         trigModeEnumNodeInfo.pCamera = pointer(camera)
         trigModeEnumNodeInfo.attrName = b"TriggerMode"
@@ -586,7 +586,7 @@ class Camera():
         
         # 需要释放Node资源
         # release node resource at the end of use  
-        trigModeEnumNode.contents.release(trigModeEnumNode) 
+        trigModeEnumNode.contents.release(trigModeEnumNode)  """
 
         # 开始拉流
         # start grabbing
@@ -611,6 +611,7 @@ class Camera():
 
         frame = pointer(GENICAM_Frame())
         nRet = streamSource.contents.getFrame(streamSource, byref(frame), c_uint(1000))
+        #nRet = streamSource.contents.getFrame(streamSource, byref(frame), infinite)
         if ( nRet != 0 ):
             print("getFrame fail! Timeout:[1000]ms")
             # 释放相关资源
