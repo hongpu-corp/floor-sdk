@@ -19,6 +19,64 @@ g_cameraStatusUserInfo = b"statusInfo"
 g_Image_Grabbing_Timer=60  # unit : second
 g_isStop=0
 
+# 取流回调函数Ex
+# grabbing callback function with userInfo parameter
+def onGetFrameEx(frame, userInfo):
+    print('------------------------------')
+    if (g_isStop == 1):
+        return
+
+    nRet = frame.contents.valid(frame)
+    if ( nRet != 0):
+        print("frame is invalid!")
+        # 释放驱动图像缓存资源
+        # release frame resource before return
+        frame.contents.release(frame)
+        return         
+ 
+    print("BlockId = %d userInfo = %s"  %(frame.contents.getBlockId(frame), c_char_p(userInfo).value))
+
+    # 给转码所需的参数赋值
+    # fill conversion parameter
+    imageParams = IMGCNV_SOpenParam()
+    imageParams.dataSize    = frame.contents.getImageSize(frame)
+    imageParams.height      = frame.contents.getImageHeight(frame)
+    imageParams.width       = frame.contents.getImageWidth(frame)
+    imageParams.paddingX    = frame.contents.getImagePaddingX(frame)
+    imageParams.paddingY    = frame.contents.getImagePaddingY(frame)
+    imageParams.pixelForamt = frame.contents.getImagePixelFormat(frame)
+
+    # 将裸数据图像拷出
+    # copy image data out from frame
+    imageBuff = frame.contents.getImage(frame)
+    userBuff = c_buffer(b'\0', imageParams.dataSize)
+    memmove(userBuff, c_char_p(imageBuff), imageParams.dataSize)
+
+    # 释放驱动图像缓存资源
+    # release frame resource at the end of use
+    frame.contents.release(frame)
+
+    # 如果图像格式是 Mono8 直接使用
+    # no format conversion required for Mono8
+    if imageParams.pixelForamt == EPixelType.gvspPixelMono8:
+        grayByteArray = bytearray(userBuff)
+        cvImage = numpy.array(grayByteArray).reshape(imageParams.height, imageParams.width)
+    else:
+        # 转码 => BGR24
+        # convert to BGR24
+        rgbSize = c_int()
+        rgbBuff = c_buffer(b'\0', imageParams.height * imageParams.width * 3)
+
+        nRet = IMGCNV_ConvertToBGR24(cast(userBuff, c_void_p), \
+                                     byref(imageParams), \
+                                     cast(rgbBuff, c_void_p), \
+                                     byref(rgbSize))
+
+        colorByteArray = bytearray(rgbBuff)
+        cvImage = numpy.array(colorByteArray).reshape(imageParams.height, imageParams.width, 3)
+   # --- end if ---
+
+
 
 # 相机连接状态回调函数
 # camera connection status change callback
@@ -30,6 +88,7 @@ def deviceLinkNotify(connectArg, linkInfo):
     
 
 connectCallBackFuncEx = connectCallBackEx(deviceLinkNotify)
+frameCallbackFuncEx = callbackFuncEx(onGetFrameEx)
 
 # 注册相机连接状态回调
 # subscribe camera connection status change
@@ -82,7 +141,7 @@ def unsubscribeCameraStatus(camera):
     # release subscribe resource at the end of use
     eventSubscribe.contents.release(eventSubscribe)
     return 0   
- 
+
 # 设置软触发
 # set software trigger
 def setSoftTriggerConf(camera):
@@ -110,7 +169,7 @@ def setSoftTriggerConf(camera):
     
     # 需要释放Node资源
     # release node resource at the end of use
-    trigSourceEnumNode.release(byref(trigSourceEnumNode)) 
+    trigSourceEnumNode.release(byref(trigSourceEnumNode))
     
     # 设置触发方式
     # set trigger selector to FrameStart
@@ -145,7 +204,7 @@ def setSoftTriggerConf(camera):
     trigModeEnumNode.release(byref(trigModeEnumNode))
     acqCtrl.contents.release(acqCtrl)
     
-    return 0 
+    return 0     
 
 # 设置外触发
 # set external trigger
@@ -266,7 +325,7 @@ def closeCamera(camera):
     
     return 0    
 
-""" # 设置曝光
+# 设置曝光
 # set camera ExposureTime
 def setExposureTime(camera, dVal):
     # 通用属性设置:设置曝光 --根据属性类型，直接构造属性节点。如曝光是 double类型，构造doubleNode节点
@@ -295,7 +354,7 @@ def setExposureTime(camera, dVal):
     # 释放节点资源
     # release node resource at the end of use
     exposureTimeNode.contents.release(exposureTimeNode)    
-    return 0 """
+    return 0
     
 # 枚举相机
 # enumerate camera
@@ -322,6 +381,53 @@ def enumCameras():
     else:
         print("cameraCnt: " + str(cameraCnt.value))
         return cameraCnt.value, cameraList
+
+def grabOne(camera):
+    # 创建流对象
+    # create stream source object
+    streamSourceInfo = GENICAM_StreamSourceInfo()
+    streamSourceInfo.channelId = 0
+    streamSourceInfo.pCamera = pointer(camera)
+      
+    streamSource = pointer(GENICAM_StreamSource())
+    nRet = GENICAM_createStreamSource(pointer(streamSourceInfo), byref(streamSource))
+    if ( nRet != 0 ):
+        print("create StreamSource fail!")     
+        return -1
+    
+    # 创建AcquisitionControl节点
+    # create AcquisitionControl node
+    acqCtrlInfo = GENICAM_AcquisitionControlInfo()
+    acqCtrlInfo.pCamera = pointer(camera)
+    acqCtrl = pointer(GENICAM_AcquisitionControl())
+    nRet = GENICAM_createAcquisitionControl(pointer(acqCtrlInfo), byref(acqCtrl))
+    if ( nRet != 0 ):
+        print("create AcquisitionControl fail!")
+        # 释放相关资源
+        # release stream source object before return
+        streamSource.contents.release(streamSource)  
+        return -1
+        
+    # 执行一次软触发
+    # execute software trigger once
+    trigSoftwareCmdNode = acqCtrl.contents.triggerSoftware(acqCtrl)
+    nRet = trigSoftwareCmdNode.execute(byref(trigSoftwareCmdNode))
+    if( nRet != 0 ):
+        print("Execute triggerSoftware fail!")
+        # 释放相关资源
+        # release node resource before return
+        trigSoftwareCmdNode.release(byref(trigSoftwareCmdNode))
+        acqCtrl.contents.release(acqCtrl)
+        streamSource.contents.release(streamSource)   
+        return -1   
+
+    # 释放相关资源
+    # release node resource at the end of use
+    trigSoftwareCmdNode.release(byref(trigSoftwareCmdNode))
+    acqCtrl.contents.release(acqCtrl)
+    streamSource.contents.release(streamSource) 
+    
+    return 0  
 
 # 设置感兴趣区域  --- 感兴趣区域的宽高 和 xy方向的偏移量  入参值应符合对应相机的递增规则
 # set ROI ---Height, width, offsetX, offsetY. Input value shall comply with the step length and Max & Min limits.
@@ -475,13 +581,13 @@ def setROI(camera, OffsetX, OffsetY, nWidth, nHeight):
 
 class Camera():   
     def __init__(self, callback) :
+        self.camera = None
+        self.streamSource = None
         # 发现相机
         # enumerate camera
-        self.streamSource = None
-
         cameraCnt, cameraList = enumCameras()
         if cameraCnt is None:
-            return
+            return -1
         
         # 显示相机信息
         # print camera info
@@ -493,15 +599,14 @@ class Camera():
             print("Model  name   = " + str(camera.getModelName(camera)))
             print("Serial number = " + str(camera.getSerialNumber(camera)))
             
-        self.camera = cameraList[0]
+        camera = cameraList[0]
 
         # 打开相机
         # open camera
         nRet = openCamera(camera)
         if ( nRet != 0 ):
             print("openCamera fail.")
-            self.camera = None
-            return
+            return -1;
             
         # 创建流对象
         # create stream source object
@@ -513,20 +618,20 @@ class Camera():
         nRet = GENICAM_createStreamSource(pointer(streamSourceInfo), byref(streamSource))
         if ( nRet != 0 ):
             print("create StreamSource fail!")
-            return
-
+            return -1
+        
+                
         # 注册拉流回调函数
         # subscribe grabbing callback
         userInfo = b"test"
-        frameCallbackFuncEx = callbackFuncEx(self.onGetFrameEx)
         nRet = streamSource.contents.attachGrabbingEx(streamSource, frameCallbackFuncEx, userInfo)    
         if ( nRet != 0 ):
             print("attachGrabbingEx fail!")
             # 释放相关资源
             # release stream source object before return
             streamSource.contents.release(streamSource)  
-            return
-
+            return -1
+            
         # 开始拉流
         # start grabbing
         nRet = streamSource.contents.startGrabbing(streamSource, c_ulonglong(0), \
@@ -536,14 +641,16 @@ class Camera():
             # 释放相关资源
             # release stream source object before return
             streamSource.contents.release(streamSource)   
-            return
+            return -1
 
+        self.camera = camera
         self.streamSource = streamSource
 
     # 取流回调函数Ex
     # grabbing callback function with userInfo parameter
-    def onGetFrameEx(self, frame, userInfo):
-
+    @staticmethod
+    def onGetFrameEx( self, frame, userInfo):
+        print('------------------------------')
         if (g_isStop == 1):
             return
 
@@ -599,6 +706,8 @@ class Camera():
         self.callback(cvImage)
 
     def grabOne(self):
+        grabOne(self.camera)
+        return
         camera = self.camera
         # 创建流对象
         # create stream source object
@@ -649,6 +758,9 @@ class Camera():
 
     def __del__(self):
         # unsubscribe grabbing callback
+        # 反注册回调函数
+        # unsubscribe grabbing callback
+        camera = self.camera
         streamSource = self.streamSource
         nRet = streamSource.contents.detachGrabbingEx(streamSource, frameCallbackFuncEx, userInfo) 
         if ( nRet != 0 ):
@@ -657,26 +769,32 @@ class Camera():
             # release stream source object before return
             streamSource.contents.release(streamSource)  
             return -1
+
         # 停止拉流
         # stop grabbing
-        streamSource = self.streamSource
         nRet = streamSource.contents.stopGrabbing(streamSource)
         if ( nRet != 0 ):
             print("stopGrabbing fail!")
             # 释放相关资源
+            # release stream source object before return
             streamSource.contents.release(streamSource)  
             return -1
 
+        cv2.destroyAllWindows()
+
         # 关闭相机
         # close camera
-        nRet = closeCamera(self.camera)
+        nRet = closeCamera(camera)
         if ( nRet != 0 ):
             print("closeCamera fail")
             # 释放相关资源
+            # release stream source object before return
             streamSource.contents.release(streamSource)   
             return -1
         
         # 释放相关资源
         # release stream source object at the end of use
         streamSource.contents.release(streamSource)    
+        
+        return 0
 
