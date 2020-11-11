@@ -620,35 +620,7 @@ def demo():
         print("create StreamSource fail!")
         return -1
     
-    # 通用属性设置:设置触发模式为off --根据属性类型，直接构造属性节点。如触发模式是 enumNode，构造enumNode节点
-    # create corresponding property node according to the value type of property, here is enumNode
-    # 自由拉流：TriggerMode 需为 off
-    # set trigger mode to Off for continuously grabbing
-    trigModeEnumNode = pointer(GENICAM_EnumNode())
-    trigModeEnumNodeInfo = GENICAM_EnumNodeInfo() 
-    trigModeEnumNodeInfo.pCamera = pointer(camera)
-    trigModeEnumNodeInfo.attrName = b"TriggerMode"
-    nRet = GENICAM_createEnumNode(byref(trigModeEnumNodeInfo), byref(trigModeEnumNode))
-    if ( nRet != 0 ):
-        print("create TriggerMode Node fail!")
-        # 释放相关资源
-        # release node resource before return
-        streamSource.contents.release(streamSource) 
-        return -1
-    
-    nRet = trigModeEnumNode.contents.setValueBySymbol(trigModeEnumNode, b"Off")
-    if ( nRet != 0 ):
-        print("set TriggerMode value [Off] fail!")
-        # 释放相关资源
-        # release node resource before return
-        trigModeEnumNode.contents.release(trigModeEnumNode)
-        streamSource.contents.release(streamSource) 
-        return -1
-      
-    # 需要释放Node资源
-    # release node resource at the end of use  
-    trigModeEnumNode.contents.release(trigModeEnumNode) 
-          
+            
     # 注册拉流回调函数
     # subscribe grabbing callback
     userInfo = b"test"
@@ -671,12 +643,12 @@ def demo():
         streamSource.contents.release(streamSource)   
         return -1
       
-    # 自由拉流 x 秒
-    # grabbing x seconds
-    time.sleep(g_Image_Grabbing_Timer)
-    global g_isStop
-    g_isStop = 1
+    for i in range(10):
+        grabOne(camera)
+        time.sleep(2)
 
+
+    
     # 反注册回调函数
     # unsubscribe grabbing callback
     nRet = streamSource.contents.detachGrabbingEx(streamSource, frameCallbackFuncEx, userInfo) 
@@ -714,6 +686,58 @@ def demo():
     streamSource.contents.release(streamSource)    
     
     return 0
+
+def grabOne(camera):
+    # 创建流对象
+    # create stream source object
+    streamSourceInfo = GENICAM_StreamSourceInfo()
+    streamSourceInfo.channelId = 0
+    streamSourceInfo.pCamera = pointer(camera)
+      
+    streamSource = pointer(GENICAM_StreamSource())
+    nRet = GENICAM_createStreamSource(pointer(streamSourceInfo), byref(streamSource))
+    if ( nRet != 0 ):
+        print("create StreamSource fail!")     
+        return -1
+    
+    # 创建AcquisitionControl节点
+    # create AcquisitionControl node
+    acqCtrlInfo = GENICAM_AcquisitionControlInfo()
+    acqCtrlInfo.pCamera = pointer(camera)
+    acqCtrl = pointer(GENICAM_AcquisitionControl())
+    nRet = GENICAM_createAcquisitionControl(pointer(acqCtrlInfo), byref(acqCtrl))
+    if ( nRet != 0 ):
+        print("create AcquisitionControl fail!")
+        # 释放相关资源
+        # release stream source object before return
+        streamSource.contents.release(streamSource)  
+        return -1
+        
+    # 执行一次软触发
+    # execute software trigger once
+    trigSoftwareCmdNode = acqCtrl.contents.triggerSoftware(acqCtrl)
+    nRet = trigSoftwareCmdNode.execute(byref(trigSoftwareCmdNode))
+    if( nRet != 0 ):
+        print("Execute triggerSoftware fail!")
+        # 释放相关资源
+        # release node resource before return
+        trigSoftwareCmdNode.release(byref(trigSoftwareCmdNode))
+        acqCtrl.contents.release(acqCtrl)
+        streamSource.contents.release(streamSource)   
+        return -1   
+
+    # 释放相关资源
+    # release node resource at the end of use
+    trigSoftwareCmdNode.release(byref(trigSoftwareCmdNode))
+    acqCtrl.contents.release(acqCtrl)
+    streamSource.contents.release(streamSource) 
+    
+    return 0  
+
+
+
+
+
     
 if __name__=="__main__": 
 
@@ -723,3 +747,6 @@ if __name__=="__main__":
     print("--------- Demo end ---------")
     # 3s exit
     time.sleep(0.2) 	
+
+
+  

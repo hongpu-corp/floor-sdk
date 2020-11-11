@@ -79,7 +79,7 @@ def unsubscribeCameraStatus(camera):
     # release subscribe resource at the end of use
     eventSubscribe.contents.release(eventSubscribe)
     return 0   
-
+ 
 # 设置软触发
 # set software trigger
 def setSoftTriggerConf(camera):
@@ -107,7 +107,7 @@ def setSoftTriggerConf(camera):
     
     # 需要释放Node资源
     # release node resource at the end of use
-    trigSourceEnumNode.release(byref(trigSourceEnumNode))
+    trigSourceEnumNode.release(byref(trigSourceEnumNode)) 
     
     # 设置触发方式
     # set trigger selector to FrameStart
@@ -142,7 +142,7 @@ def setSoftTriggerConf(camera):
     trigModeEnumNode.release(byref(trigModeEnumNode))
     acqCtrl.contents.release(acqCtrl)
     
-    return 0     
+    return 0 
 
 # 设置外触发
 # set external trigger
@@ -557,6 +557,7 @@ class Camera():
         nRet = GENICAM_createStreamSource(pointer(streamSourceInfo), byref(streamSource))
         if ( nRet != 0 ):
             print("create StreamSource fail!")
+            
             return
         
         # 通用属性设置:设置触发模式为off --根据属性类型，直接构造属性节点。如触发模式是 enumNode，构造enumNode节点
@@ -613,6 +614,8 @@ class Camera():
         frame = pointer(GENICAM_Frame())
         nRet = streamSource.contents.getFrame(streamSource, byref(frame), c_uint(1000))
         #nRet = streamSource.contents.getFrame(streamSource, byref(frame), infinite)
+
+        
         if ( nRet != 0 ):
             print("getFrame fail! Timeout:[1000]ms")
             # 释放相关资源
