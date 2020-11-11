@@ -19,64 +19,6 @@ g_cameraStatusUserInfo = b"statusInfo"
 g_Image_Grabbing_Timer=60  # unit : second
 g_isStop=0
 
-# 取流回调函数Ex
-# grabbing callback function with userInfo parameter
-def onGetFrameEx(frame, userInfo):
-    print('------------------------------')
-    if (g_isStop == 1):
-        return
-
-    nRet = frame.contents.valid(frame)
-    if ( nRet != 0):
-        print("frame is invalid!")
-        # 释放驱动图像缓存资源
-        # release frame resource before return
-        frame.contents.release(frame)
-        return         
- 
-    print("BlockId = %d userInfo = %s"  %(frame.contents.getBlockId(frame), c_char_p(userInfo).value))
-
-    # 给转码所需的参数赋值
-    # fill conversion parameter
-    imageParams = IMGCNV_SOpenParam()
-    imageParams.dataSize    = frame.contents.getImageSize(frame)
-    imageParams.height      = frame.contents.getImageHeight(frame)
-    imageParams.width       = frame.contents.getImageWidth(frame)
-    imageParams.paddingX    = frame.contents.getImagePaddingX(frame)
-    imageParams.paddingY    = frame.contents.getImagePaddingY(frame)
-    imageParams.pixelForamt = frame.contents.getImagePixelFormat(frame)
-
-    # 将裸数据图像拷出
-    # copy image data out from frame
-    imageBuff = frame.contents.getImage(frame)
-    userBuff = c_buffer(b'\0', imageParams.dataSize)
-    memmove(userBuff, c_char_p(imageBuff), imageParams.dataSize)
-
-    # 释放驱动图像缓存资源
-    # release frame resource at the end of use
-    frame.contents.release(frame)
-
-    # 如果图像格式是 Mono8 直接使用
-    # no format conversion required for Mono8
-    if imageParams.pixelForamt == EPixelType.gvspPixelMono8:
-        grayByteArray = bytearray(userBuff)
-        cvImage = numpy.array(grayByteArray).reshape(imageParams.height, imageParams.width)
-    else:
-        # 转码 => BGR24
-        # convert to BGR24
-        rgbSize = c_int()
-        rgbBuff = c_buffer(b'\0', imageParams.height * imageParams.width * 3)
-
-        nRet = IMGCNV_ConvertToBGR24(cast(userBuff, c_void_p), \
-                                     byref(imageParams), \
-                                     cast(rgbBuff, c_void_p), \
-                                     byref(rgbSize))
-
-        colorByteArray = bytearray(rgbBuff)
-        cvImage = numpy.array(colorByteArray).reshape(imageParams.height, imageParams.width, 3)
-   # --- end if ---
-
-
 
 # 相机连接状态回调函数
 # camera connection status change callback
@@ -88,7 +30,6 @@ def deviceLinkNotify(connectArg, linkInfo):
     
 
 connectCallBackFuncEx = connectCallBackEx(deviceLinkNotify)
-frameCallbackFuncEx = callbackFuncEx(onGetFrameEx)
 
 # 注册相机连接状态回调
 # subscribe camera connection status change
@@ -583,6 +524,7 @@ class Camera():
     def __init__(self, callback) :
         self.camera = None
         self.streamSource = None
+        self.callback = callback
         # 发现相机
         # enumerate camera
         cameraCnt, cameraList = enumCameras()
@@ -623,8 +565,10 @@ class Camera():
                 
         # 注册拉流回调函数
         # subscribe grabbing callback
-        userInfo = b"test"
-        nRet = streamSource.contents.attachGrabbingEx(streamSource, frameCallbackFuncEx, userInfo)    
+        self.userInfo = b"test"
+        self.frameCallbackFuncEx = callbackFuncEx(self.onGetFrameEx)
+
+        nRet = streamSource.contents.attachGrabbingEx(streamSource, self.frameCallbackFuncEx, self.userInfo)    
         if ( nRet != 0 ):
             print("attachGrabbingEx fail!")
             # 释放相关资源
@@ -648,9 +592,8 @@ class Camera():
 
     # 取流回调函数Ex
     # grabbing callback function with userInfo parameter
-    @staticmethod
-    def onGetFrameEx( self, frame, userInfo):
-        print('------------------------------')
+    def onGetFrameEx(self, frame, userInfo):
+        print('onGetFrameEx called')
         if (g_isStop == 1):
             return
 
@@ -702,7 +645,8 @@ class Camera():
 
             colorByteArray = bytearray(rgbBuff)
             cvImage = numpy.array(colorByteArray).reshape(imageParams.height, imageParams.width, 3)
-    # --- end if ---
+        # --- end if ---
+
         self.callback(cvImage)
 
     def grabOne(self):
@@ -762,7 +706,7 @@ class Camera():
         # unsubscribe grabbing callback
         camera = self.camera
         streamSource = self.streamSource
-        nRet = streamSource.contents.detachGrabbingEx(streamSource, frameCallbackFuncEx, userInfo) 
+        nRet = streamSource.contents.detachGrabbingEx(streamSource, self.frameCallbackFuncEx, self.userInfo) 
         if ( nRet != 0 ):
             print("detachGrabbingEx fail!")
             # 释放相关资源
