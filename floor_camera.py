@@ -16,6 +16,9 @@ import cv2
 import gc
 
 g_cameraStatusUserInfo = b"statusInfo"
+g_Image_Grabbing_Timer=60  # unit : second
+g_isStop=0
+
 
 # 相机连接状态回调函数
 # camera connection status change callback
@@ -320,53 +323,6 @@ def enumCameras():
         print("cameraCnt: " + str(cameraCnt.value))
         return cameraCnt.value, cameraList
 
-def grabOne(camera):
-    # 创建流对象
-    # create stream source object
-    streamSourceInfo = GENICAM_StreamSourceInfo()
-    streamSourceInfo.channelId = 0
-    streamSourceInfo.pCamera = pointer(camera)
-      
-    streamSource = pointer(GENICAM_StreamSource())
-    nRet = GENICAM_createStreamSource(pointer(streamSourceInfo), byref(streamSource))
-    if ( nRet != 0 ):
-        print("create StreamSource fail!")     
-        return -1
-    
-    # 创建AcquisitionControl节点
-    # create AcquisitionControl node
-    acqCtrlInfo = GENICAM_AcquisitionControlInfo()
-    acqCtrlInfo.pCamera = pointer(camera)
-    acqCtrl = pointer(GENICAM_AcquisitionControl())
-    nRet = GENICAM_createAcquisitionControl(pointer(acqCtrlInfo), byref(acqCtrl))
-    if ( nRet != 0 ):
-        print("create AcquisitionControl fail!")
-        # 释放相关资源
-        # release stream source object before return
-        streamSource.contents.release(streamSource)  
-        return -1
-        
-    # 执行一次软触发
-    # execute software trigger once
-    trigSoftwareCmdNode = acqCtrl.contents.triggerSoftware(acqCtrl)
-    nRet = trigSoftwareCmdNode.execute(byref(trigSoftwareCmdNode))
-    if( nRet != 0 ):
-        print("Execute triggerSoftware fail!")
-        # 释放相关资源
-        # release node resource before return
-        trigSoftwareCmdNode.release(byref(trigSoftwareCmdNode))
-        acqCtrl.contents.release(acqCtrl)
-        streamSource.contents.release(streamSource)   
-        return -1   
-
-    # 释放相关资源
-    # release node resource at the end of use
-    trigSoftwareCmdNode.release(byref(trigSoftwareCmdNode))
-    acqCtrl.contents.release(acqCtrl)
-    streamSource.contents.release(streamSource) 
-    
-    return 0  
-
 # 设置感兴趣区域  --- 感兴趣区域的宽高 和 xy方向的偏移量  入参值应符合对应相机的递增规则
 # set ROI ---Height, width, offsetX, offsetY. Input value shall comply with the step length and Max & Min limits.
 def setROI(camera, OffsetX, OffsetY, nWidth, nHeight):
@@ -518,7 +474,7 @@ def setROI(camera, OffsetX, OffsetY, nWidth, nHeight):
     return 0
 
 class Camera():   
-    def __init__(self) :
+    def __init__(self, callback) :
         # 发现相机
         # enumerate camera
         self.streamSource = None
@@ -557,38 +513,19 @@ class Camera():
         nRet = GENICAM_createStreamSource(pointer(streamSourceInfo), byref(streamSource))
         if ( nRet != 0 ):
             print("create StreamSource fail!")
-            
             return
-        
-        # 通用属性设置:设置触发模式为off --根据属性类型，直接构造属性节点。如触发模式是 enumNode，构造enumNode节点
-        # create corresponding property node according to the value type of property, here is enumNode
-        # 自由拉流：TriggerMode 需为 off
-        # set trigger mode to Off for continuously grabbing
-        # 暂时取消此功能。
-        """ trigModeEnumNode = pointer(GENICAM_EnumNode())
-        trigModeEnumNodeInfo = GENICAM_EnumNodeInfo() 
-        trigModeEnumNodeInfo.pCamera = pointer(camera)
-        trigModeEnumNodeInfo.attrName = b"TriggerMode"
-        nRet = GENICAM_createEnumNode(byref(trigModeEnumNodeInfo), byref(trigModeEnumNode))
+
+        # 注册拉流回调函数
+        # subscribe grabbing callback
+        userInfo = b"test"
+        frameCallbackFuncEx = callbackFuncEx(self.onGetFrameEx)
+        nRet = streamSource.contents.attachGrabbingEx(streamSource, frameCallbackFuncEx, userInfo)    
         if ( nRet != 0 ):
-            print("create TriggerMode Node fail!")
+            print("attachGrabbingEx fail!")
             # 释放相关资源
-            # release node resource before return
-            streamSource.contents.release(streamSource) 
+            # release stream source object before return
+            streamSource.contents.release(streamSource)  
             return
-        
-        nRet = trigModeEnumNode.contents.setValueBySymbol(trigModeEnumNode, b"Off")
-        if ( nRet != 0 ):
-            print("set TriggerMode value [Off] fail!")
-            # 释放相关资源
-            # release node resource before return
-            trigModeEnumNode.contents.release(trigModeEnumNode)
-            streamSource.contents.release(streamSource) 
-            return
-        
-        # 需要释放Node资源
-        # release node resource at the end of use  
-        trigModeEnumNode.contents.release(trigModeEnumNode)  """
 
         # 开始拉流
         # start grabbing
@@ -603,38 +540,22 @@ class Camera():
 
         self.streamSource = streamSource
 
-    def grab_img(self):
-        # 主动取图
-        # get one frame
-        if not self.streamSource:
+    # 取流回调函数Ex
+    # grabbing callback function with userInfo parameter
+    def onGetFrameEx(self, frame, userInfo):
+
+        if (g_isStop == 1):
             return
 
-        streamSource = self.streamSource
-
-        frame = pointer(GENICAM_Frame())
-        nRet = streamSource.contents.getFrame(streamSource, byref(frame), c_uint(1000))
-        #nRet = streamSource.contents.getFrame(streamSource, byref(frame), infinite)
-
-        
-        if ( nRet != 0 ):
-            print("getFrame fail! Timeout:[1000]ms")
-            # 释放相关资源
-            # release stream source object before return
-            streamSource.contents.release(streamSource)   
-            return
-        else:
-            print("getFrame success BlockId = [" + str(frame.contents.getBlockId(frame)) + "], get frame time: " + str(datetime.datetime.now()))
-        
         nRet = frame.contents.valid(frame)
-        if ( nRet != 0 ):
+        if ( nRet != 0):
             print("frame is invalid!")
             # 释放驱动图像缓存资源
             # release frame resource before return
             frame.contents.release(frame)
-            # 释放相关资源
-            # release stream source object before return
-            streamSource.contents.release(streamSource)
-            return
+            return         
+    
+        print("BlockId = %d userInfo = %s"  %(frame.contents.getBlockId(frame), c_char_p(userInfo).value))
 
         # 给转码所需的参数赋值
         # fill conversion parameter
@@ -652,7 +573,7 @@ class Camera():
         userBuff = c_buffer(b'\0', imageParams.dataSize)
         memmove(userBuff, c_char_p(imageBuff), imageParams.dataSize)
 
-        # 释放驱动图像缓存
+        # 释放驱动图像缓存资源
         # release frame resource at the end of use
         frame.contents.release(frame)
 
@@ -671,13 +592,71 @@ class Camera():
                                         byref(imageParams), \
                                         cast(rgbBuff, c_void_p), \
                                         byref(rgbSize))
-    
+
             colorByteArray = bytearray(rgbBuff)
             cvImage = numpy.array(colorByteArray).reshape(imageParams.height, imageParams.width, 3)
+    # --- end if ---
+        self.callback(cvImage)
 
-        return cvImage
+    def grabOne(self):
+        camera = self.camera
+        # 创建流对象
+        # create stream source object
+        streamSourceInfo = GENICAM_StreamSourceInfo()
+        streamSourceInfo.channelId = 0
+        streamSourceInfo.pCamera = pointer(camera)
+        
+        streamSource = pointer(GENICAM_StreamSource())
+        nRet = GENICAM_createStreamSource(pointer(streamSourceInfo), byref(streamSource))
+        if ( nRet != 0 ):
+            print("create StreamSource fail!")     
+            return -1
+        
+        # 创建AcquisitionControl节点
+        # create AcquisitionControl node
+        acqCtrlInfo = GENICAM_AcquisitionControlInfo()
+        acqCtrlInfo.pCamera = pointer(camera)
+        acqCtrl = pointer(GENICAM_AcquisitionControl())
+        nRet = GENICAM_createAcquisitionControl(pointer(acqCtrlInfo), byref(acqCtrl))
+        if ( nRet != 0 ):
+            print("create AcquisitionControl fail!")
+            # 释放相关资源
+            # release stream source object before return
+            streamSource.contents.release(streamSource)  
+            return -1
+            
+        # 执行一次软触发
+        # execute software trigger once
+        trigSoftwareCmdNode = acqCtrl.contents.triggerSoftware(acqCtrl)
+        nRet = trigSoftwareCmdNode.execute(byref(trigSoftwareCmdNode))
+        if( nRet != 0 ):
+            print("Execute triggerSoftware fail!")
+            # 释放相关资源
+            # release node resource before return
+            trigSoftwareCmdNode.release(byref(trigSoftwareCmdNode))
+            acqCtrl.contents.release(acqCtrl)
+            streamSource.contents.release(streamSource)   
+            return -1   
+
+        # 释放相关资源
+        # release node resource at the end of use
+        trigSoftwareCmdNode.release(byref(trigSoftwareCmdNode))
+        acqCtrl.contents.release(acqCtrl)
+        streamSource.contents.release(streamSource) 
+        
+        return 0  
+
 
     def __del__(self):
+        # unsubscribe grabbing callback
+        streamSource = self.streamSource
+        nRet = streamSource.contents.detachGrabbingEx(streamSource, frameCallbackFuncEx, userInfo) 
+        if ( nRet != 0 ):
+            print("detachGrabbingEx fail!")
+            # 释放相关资源
+            # release stream source object before return
+            streamSource.contents.release(streamSource)  
+            return -1
         # 停止拉流
         # stop grabbing
         streamSource = self.streamSource
