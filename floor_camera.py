@@ -529,7 +529,7 @@ class Camera():
         # enumerate camera
         cameraCnt, cameraList = enumCameras()
         if cameraCnt is None:
-            return -1
+            return
         
         # 显示相机信息
         # print camera info
